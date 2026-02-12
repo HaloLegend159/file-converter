@@ -532,18 +532,17 @@
         });
 
         async function convertFile(file, targetFormat) {
+            if (currentCategory === 'pdf') {
+                // Handle PDF conversion with async/await
+                return convertPDFAsync(file, targetFormat);
+            }
+            
             return new Promise((resolve, reject) => {
                 if (currentCategory === 'image') {
                     const reader = new FileReader();
                     reader.onload = (e) => convertImage(e.target.result, targetFormat, file.name, resolve, reject);
                     reader.onerror = () => reject(new Error('Failed to read file'));
                     reader.readAsDataURL(file);
-                } 
-                else if (currentCategory === 'pdf') {
-                    const reader = new FileReader();
-                    reader.onload = (e) => convertPDF(e.target.result, targetFormat, file.name, resolve, reject);
-                    reader.onerror = () => reject(new Error('Failed to read file'));
-                    reader.readAsArrayBuffer(file);
                 } 
                 else if (currentCategory === 'video') {
                     // Check if converting to audio
@@ -566,13 +565,26 @@
             });
         }
 
-        async function convertPDF(arrayBuffer, targetFormat, originalName, resolve, reject) {
+        async function convertPDFAsync(file, targetFormat) {
+            // Check if PDF.js is loaded
+            if (typeof pdfjsLib === 'undefined') {
+                throw new Error('PDF.js library not loaded. Please refresh the page and try again.');
+            }
+            
+            const arrayBuffer = await file.arrayBuffer();
+            return convertPDF(arrayBuffer, targetFormat, file.name);
+        }
+
+        async function convertPDF(arrayBuffer, targetFormat, originalName) {
             try {
+                console.log('Loading PDF...');
                 const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
+                console.log('PDF loaded, getting page...');
                 const page = await pdf.getPage(1); // Get first page
                 
                 const scale = 2.0; // Higher quality
                 const viewport = page.getViewport({scale: scale});
+                console.log('Rendering page...');
                 
                 const canvas = document.createElement('canvas');
                 const context = canvas.getContext('2d');
@@ -584,17 +596,27 @@
                     viewport: viewport
                 }).promise;
                 
+                console.log('Page rendered, creating blob...');
+                
                 const mimeType = 'image/' + (targetFormat === 'jpg' ? 'jpeg' : targetFormat);
                 
-                canvas.toBlob(function(blob) {
-                    const url = URL.createObjectURL(blob);
-                    const baseName = originalName.substring(0, originalName.lastIndexOf('.'));
-                    downloadBtn.href = url;
-                    downloadBtn.download = baseName + '_page1.' + targetFormat;
-                    resolve();
-                }, mimeType, 0.95);
+                return new Promise((resolve, reject) => {
+                    canvas.toBlob(function(blob) {
+                        if (!blob) {
+                            reject(new Error('Failed to create image blob'));
+                            return;
+                        }
+                        const url = URL.createObjectURL(blob);
+                        const baseName = originalName.substring(0, originalName.lastIndexOf('.')) || originalName;
+                        downloadBtn.href = url;
+                        downloadBtn.download = baseName + '_page1.' + targetFormat;
+                        console.log('Conversion complete!');
+                        resolve();
+                    }, mimeType, 0.95);
+                });
             } catch (error) {
-                reject(error);
+                console.error('PDF conversion error:', error);
+                throw new Error('PDF conversion failed: ' + error.message);
             }
         }
 
